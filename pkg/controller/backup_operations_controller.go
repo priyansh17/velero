@@ -131,11 +131,6 @@ func (c *backupOperationsReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	backup := original.DeepCopy()
 	log.Debugf("backup: %s", backup.Name)
 
-	// Get the effective backup operations frequency for this backup.
-	// Note: Currently, the controller uses a global polling frequency via PeriodicalEnqueueSource.
-	// This per-backup frequency could be used for future enhancements such as dynamic requeue intervals.
-	_ = c.getBackupOperationsFrequency(backup)
-
 	log = c.logger.WithFields(
 		logrus.Fields{
 			"backup": req.String(),
