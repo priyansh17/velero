@@ -126,10 +126,20 @@ func (ib *itemBackupper) itemInclusionChecks(log logrus.FieldLogger, mustInclude
 			return false
 		}
 
-		// NOTE: we specifically allow namespaces to be backed up even if it's excluded.
-		// This check is more permissive for cluster resources to let those passed in by
-		// plugins' additional items to get involved.
-		// Only expel cluster resource when it's specifically listed in the excluded list here.
+		// For Namespace objects (cluster-scoped), apply the namespace filter based on the
+		// Namespace object's name. If the namespace is in the excludedNamespaces list,
+		// do not back up its Namespace object either.
+		if namespace == "" && groupResource == kuberesource.Namespaces &&
+			!ib.backupRequest.NamespaceIncludesExcludes.ShouldInclude(metadata.GetName()) {
+			log.Info("Excluding namespace object because namespace is excluded")
+			return false
+		}
+
+		// NOTE: we specifically allow other cluster-scoped resources to be backed up
+		// even if their associated namespace is excluded. This check is more permissive
+		// for cluster resources to let those passed in by plugins' additional items to
+		// get involved. Only expel cluster resource when it's specifically listed in the
+		// excluded list here.
 		if namespace == "" && groupResource != kuberesource.Namespaces &&
 			ib.backupRequest.ResourceIncludesExcludes.ShouldExclude(groupResource.String()) {
 			log.Info("Excluding item because resource is cluster-scoped and is excluded by cluster filter.")
