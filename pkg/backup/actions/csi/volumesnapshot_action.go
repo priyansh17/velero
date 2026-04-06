@@ -301,6 +301,9 @@ func (p *volumeSnapshotBackupItemAction) Progress(
 		if existingTime, ok := vs.Annotations[velerov1api.VSErrorFirstObservedTimeAnnotation]; ok {
 			if t, err := time.Parse(time.RFC3339, existingTime); err == nil {
 				firstObservedTime = t
+			} else {
+				p.log.Warnf("VolumeSnapshot %s/%s has an unparseable %s annotation value %q, resetting timer: %v",
+					vs.Namespace, vs.Name, velerov1api.VSErrorFirstObservedTimeAnnotation, existingTime, err)
 			}
 		} else {
 			// First time we observe this error — stamp the annotation onto the VS.
@@ -328,8 +331,8 @@ func (p *volumeSnapshotBackupItemAction) Progress(
 			return progress, nil
 		}
 
-		p.log.Warnf("VolumeSnapshot has a temporary error %s. Snapshot controller will retry later.",
-			errorMessage)
+		p.log.Warnf("VolumeSnapshot %s/%s has an error within the CSISnapshotTimeout window: %s. Snapshot controller will retry later.",
+			vs.Namespace, vs.Name, errorMessage)
 
 		return progress, nil
 	}
