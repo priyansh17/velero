@@ -220,7 +220,7 @@ func TestVSProgress(t *testing.T) {
 			expectedErr: false,
 		},
 		{
-			name:        "VS status has error, no CSISnapshotTimeout configured",
+			name:        "VS status has error, no prior annotation, no CSISnapshotTimeout configured",
 			operationID: "ns/name/2024-04-11T18:49:00+08:00",
 			vs: builder.ForVolumeSnapshot("ns", "name").Status().
 				StatusError(snapshotv1api.VolumeSnapshotError{
@@ -230,9 +230,13 @@ func TestVSProgress(t *testing.T) {
 			expectedErr: false,
 		},
 		{
-			name:        "VS status has error within CSISnapshotTimeout",
-			operationID: "ns/name/" + time.Now().Format(time.RFC3339),
-			vs: builder.ForVolumeSnapshot("ns", "name").Status().
+			name:        "VS status has error, annotation within CSISnapshotTimeout",
+			operationID: "ns/name/2024-04-11T18:49:00+08:00",
+			vs: builder.ForVolumeSnapshot("ns", "name").
+				ObjectMeta(builder.WithAnnotations(
+					velerov1api.VSErrorFirstObservedTimeAnnotation, time.Now().Format(time.RFC3339),
+				)).
+				Status().
 				StatusError(snapshotv1api.VolumeSnapshotError{
 					Message: &errorStr,
 				}).Result(),
@@ -242,7 +246,11 @@ func TestVSProgress(t *testing.T) {
 		{
 			name:        "VS status has persistent error beyond CSISnapshotTimeout",
 			operationID: "ns/name/2024-04-11T18:49:00+08:00",
-			vs: builder.ForVolumeSnapshot("ns", "name").Status().
+			vs: builder.ForVolumeSnapshot("ns", "name").
+				ObjectMeta(builder.WithAnnotations(
+					velerov1api.VSErrorFirstObservedTimeAnnotation, "2024-04-11T18:49:00+08:00",
+				)).
+				Status().
 				StatusError(snapshotv1api.VolumeSnapshotError{
 					Message: &errorStr,
 				}).Result(),
@@ -250,7 +258,7 @@ func TestVSProgress(t *testing.T) {
 			expectedErr: false,
 			expectedProgress: &velero.OperationProgress{
 				Completed: true,
-				Err:       fmt.Sprintf("timed out waiting for VolumeSnapshot ns/name to be ready: %s", errorStr),
+				Err:       fmt.Sprintf("VolumeSnapshot ns/name has a persistent error: %s", errorStr),
 			},
 		},
 		{

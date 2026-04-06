@@ -295,13 +295,35 @@ func (p *volumeSnapshotBackupItemAction) Progress(
 			errorMessage = *vs.Status.Error.Message
 		}
 
+		now := time.Now()
+		firstObservedTime := now
+
+		if existingTime, ok := vs.Annotations[velerov1api.VSErrorFirstObservedTimeAnnotation]; ok {
+			if t, err := time.Parse(time.RFC3339, existingTime); err == nil {
+				firstObservedTime = t
+			}
+		} else {
+			// First time we observe this error — stamp the annotation onto the VS.
+			originVS := vs.DeepCopy()
+			kubeutil.AddAnnotations(&vs.ObjectMeta, map[string]string{
+				velerov1api.VSErrorFirstObservedTimeAnnotation: now.Format(time.RFC3339),
+			})
+			if patchErr := p.crClient.Patch(
+				context.Background(), vs, crclient.MergeFrom(originVS),
+			); patchErr != nil {
+				p.log.Warnf("Failed to patch VolumeSnapshot %s/%s with error first observed time: %v",
+					vs.Namespace, vs.Name, patchErr)
+			}
+		}
+
 		timeout := backup.Spec.CSISnapshotTimeout.Duration
-		if timeout > 0 && time.Since(progress.Started) > timeout {
-			p.log.Errorf("VolumeSnapshot %s/%s has a persistent error beyond CSISnapshotTimeout (%s): %s",
+		if timeout > 0 && now.Sub(firstObservedTime) >= timeout {
+			p.log.Errorf(
+				"VolumeSnapshot %s/%s has a persistent error beyond CSISnapshotTimeout (%s): %s",
 				vs.Namespace, vs.Name, timeout, errorMessage)
 			progress.Completed = true
-			progress.Updated = time.Now()
-			progress.Err = fmt.Sprintf("timed out waiting for VolumeSnapshot %s/%s to be ready: %s",
+			progress.Updated = now
+			progress.Err = fmt.Sprintf("VolumeSnapshot %s/%s has a persistent error: %s",
 				vs.Namespace, vs.Name, errorMessage)
 			return progress, nil
 		}
