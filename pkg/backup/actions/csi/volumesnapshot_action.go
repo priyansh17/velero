@@ -294,6 +294,18 @@ func (p *volumeSnapshotBackupItemAction) Progress(
 		if vs.Status.Error.Message != nil {
 			errorMessage = *vs.Status.Error.Message
 		}
+
+		timeout := backup.Spec.CSISnapshotTimeout.Duration
+		if timeout > 0 && time.Since(progress.Started) > timeout {
+			p.log.Errorf("VolumeSnapshot %s/%s has a persistent error beyond CSISnapshotTimeout (%s): %s",
+				vs.Namespace, vs.Name, timeout, errorMessage)
+			progress.Completed = true
+			progress.Updated = time.Now()
+			progress.Err = fmt.Sprintf("timed out waiting for VolumeSnapshot %s/%s to be ready: %s",
+				vs.Namespace, vs.Name, errorMessage)
+			return progress, nil
+		}
+
 		p.log.Warnf("VolumeSnapshot has a temporary error %s. Snapshot controller will retry later.",
 			errorMessage)
 
