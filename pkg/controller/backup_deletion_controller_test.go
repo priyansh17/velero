@@ -676,7 +676,8 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		require.NoError(t, err)
 
 		td.backupStore.AssertCalled(t, "GetBackupContents", input.Spec.BackupName)
-		// DeleteBackup (on the backup store) is still called because it is not gated by errs
+		// DeleteBackup (removing backup data from object storage) is still called because
+		// that step is not gated by the errs slice; only the Kubernetes Backup CR deletion is.
 		td.backupStore.AssertCalled(t, "DeleteBackup", input.Spec.BackupName)
 
 		// the dbr should still exist and be marked Processed with errors
