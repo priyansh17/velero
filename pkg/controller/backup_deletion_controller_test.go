@@ -695,6 +695,85 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		}, &velerov1api.Backup{})
 		require.NoError(t, err, "Expected backup CR to still exist after tarball download failure")
 	})
+	t.Run("backup is still deleted if downloading tarball returns a not-found error", func(t *testing.T) {
+		backup := builder.ForBackup(velerov1api.DefaultNamespace, "foo").Result()
+		backup.UID = "uid"
+		backup.Spec.StorageLocation = "primary"
+
+		input := defaultTestDbr()
+		input.Labels = nil
+
+		location := &velerov1api.BackupStorageLocation{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: backup.Namespace,
+				Name:      backup.Spec.StorageLocation,
+			},
+			Spec: velerov1api.BackupStorageLocationSpec{
+				Provider: "objStoreProvider",
+				StorageType: velerov1api.StorageType{
+					ObjectStorage: &velerov1api.ObjectStorageLocation{
+						Bucket: "bucket",
+					},
+				},
+			},
+			Status: velerov1api.BackupStorageLocationStatus{
+				Phase: velerov1api.BackupStorageLocationPhaseAvailable,
+			},
+		}
+
+		snapshotLocation := &velerov1api.VolumeSnapshotLocation{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: backup.Namespace,
+				Name:      "vsl-1",
+			},
+			Spec: velerov1api.VolumeSnapshotLocationSpec{
+				Provider: "provider-1",
+			},
+		}
+
+		td := setupBackupDeletionControllerTest(t, defaultTestDbr(), backup, location, snapshotLocation)
+		td.volumeSnapshotter.SnapshotsTaken.Insert("snap-1")
+
+		snapshots := []*volume.Snapshot{
+			{
+				Spec: volume.SnapshotSpec{
+					Location: "vsl-1",
+				},
+				Status: volume.SnapshotStatus{
+					ProviderSnapshotID: "snap-1",
+				},
+			},
+		}
+
+		pluginManager := &pluginmocks.Manager{}
+		pluginManager.On("GetVolumeSnapshotter", "provider-1").Return(td.volumeSnapshotter, nil)
+		pluginManager.On("GetDeleteItemActions").Return([]velero.DeleteItemAction{new(mocks.DeleteItemAction)}, nil)
+		pluginManager.On("CleanupClients")
+		td.controller.newPluginManager = func(logrus.FieldLogger) clientmgmt.Manager { return pluginManager }
+
+		td.backupStore.On("GetBackupVolumeSnapshots", input.Spec.BackupName).Return(snapshots, nil)
+		// Simulate a 404/not-found error (tarball has already been removed from storage)
+		td.backupStore.On("GetBackupContents", input.Spec.BackupName).Return(nil, fmt.Errorf("key not found"))
+		td.backupStore.On("DeleteBackup", input.Spec.BackupName).Return(nil)
+
+		_, err := td.controller.Reconcile(t.Context(), td.req)
+		require.NoError(t, err)
+
+		td.backupStore.AssertCalled(t, "GetBackupContents", input.Spec.BackupName)
+		td.backupStore.AssertCalled(t, "DeleteBackup", input.Spec.BackupName)
+
+		// the dbr should be deleted (not-found is treated as permanent, deletion proceeds)
+		res := &velerov1api.DeleteBackupRequest{}
+		err = td.fakeClient.Get(ctx, td.req.NamespacedName, res)
+		assert.True(t, apierrors.IsNotFound(err), "Expected DBR to be deleted after not-found tarball error, but actual error: %v", err)
+
+		// backup CR should be deleted because there are no errors in errs
+		err = td.fakeClient.Get(t.Context(), types.NamespacedName{
+			Namespace: velerov1api.DefaultNamespace,
+			Name:      backup.Name,
+		}, &velerov1api.Backup{})
+		assert.True(t, apierrors.IsNotFound(err), "Expected backup CR to be deleted after not-found tarball error, but actual error: %v", err)
+	})
 	t.Run("Expired request will be deleted if the status is processed", func(t *testing.T) {
 		expired := time.Date(2018, 4, 3, 12, 0, 0, 0, time.UTC)
 		input := defaultTestDbr()

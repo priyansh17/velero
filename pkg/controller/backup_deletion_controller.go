@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
@@ -269,8 +270,13 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			log.WithError(err).Errorf("Unable to download tarball for backup %s, skipping associated DeleteItemAction plugins", backup.Name)
 			// Best-effort fallback for pre-v1.15 backups where VS may still exist in cluster
 			r.deleteCSIVolumeSnapshotsIfAny(ctx, backup, log)
-			// Record the error so the deletion is marked as failed and can be retried
-			errs = append(errs, errors.Wrapf(err, "error downloading backup tarball, CSI snapshot cleanup was skipped").Error())
+			// If the tarball simply does not exist (HTTP 404 / not found), the download
+			// failure is permanent and not retryable, so we let deletion proceed.
+			// For transient errors (throttling, auth failures, network issues), record
+			// the error to fail the deletion so it can be retried later.
+			if !isTarballNotFoundError(err) {
+				errs = append(errs, errors.Wrapf(err, "error downloading backup tarball, CSI snapshot cleanup was skipped").Error())
+			}
 		} else {
 			defer closeAndRemoveFile(backupFile, r.logger)
 			deleteCtx := &delete.Context{
@@ -692,4 +698,29 @@ func batchDeleteSnapshots(ctx context.Context, repoEnsurer *repository.Ensurer, 
 	}
 
 	return errs
+}
+
+// isTarballNotFoundError reports whether err indicates that the backup tarball
+// does not exist in object storage (e.g. HTTP 404 / not-found). Such errors are
+// permanent and not retryable, so callers should let deletion proceed (skipping
+// DeleteItemAction plugins) rather than failing the entire deletion.
+//
+// Transient errors (throttling, auth failures, network timeouts) return false so
+// the deletion is failed and can be retried once the storage is reachable again.
+func isTarballNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Lower-case once for all comparisons.
+	msg := strings.ToLower(err.Error())
+	// Common "not found" indicators across cloud providers:
+	//   - "not found" / "does not exist": generic, in-memory object store
+	//   - "nosuchkey":                    AWS S3
+	//   - "blobnotfound":                 Azure Blob Storage
+	//   - "objectnotexist":               GCS
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "nosuchkey") ||
+		strings.Contains(msg, "blobnotfound") ||
+		strings.Contains(msg, "objectnotexist")
 }
