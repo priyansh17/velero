@@ -267,8 +267,10 @@ func (r *backupDeletionReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 		if err != nil {
 			log.WithError(err).Errorf("Unable to download tarball for backup %s, skipping associated DeleteItemAction plugins", backup.Name)
-			log.Info("Cleaning up CSI volumesnapshots")
+			// Best-effort fallback for pre-v1.15 backups where VS may still exist in cluster
 			r.deleteCSIVolumeSnapshotsIfAny(ctx, backup, log)
+			// Record the error so the deletion is marked as failed and can be retried
+			errs = append(errs, errors.Wrapf(err, "error downloading backup tarball, CSI snapshot cleanup was skipped").Error())
 		} else {
 			defer closeAndRemoveFile(backupFile, r.logger)
 			deleteCtx := &delete.Context{

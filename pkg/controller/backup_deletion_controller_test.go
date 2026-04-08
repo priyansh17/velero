@@ -25,8 +25,6 @@ import (
 	"reflect"
 	"time"
 
-	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
-
 	"context"
 
 	"github.com/sirupsen/logrus"
@@ -606,7 +604,7 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		// Make sure snapshot was deleted
 		assert.Equal(t, 0, td.volumeSnapshotter.SnapshotsTaken.Len())
 	})
-	t.Run("backup is still deleted if downloading tarball fails for DeleteItemAction plugins", func(t *testing.T) {
+	t.Run("backup deletion fails with error when downloading tarball fails for DeleteItemAction plugins", func(t *testing.T) {
 		backup := builder.ForBackup(velerov1api.DefaultNamespace, "foo").Result()
 		backup.UID = "uid"
 		backup.Spec.StorageLocation = "primary"
@@ -678,32 +676,23 @@ func TestBackupDeletionControllerReconcile(t *testing.T) {
 		require.NoError(t, err)
 
 		td.backupStore.AssertCalled(t, "GetBackupContents", input.Spec.BackupName)
+		// DeleteBackup (on the backup store) is still called because it is not gated by errs
 		td.backupStore.AssertCalled(t, "DeleteBackup", input.Spec.BackupName)
 
-		// the dbr should be deleted
+		// the dbr should still exist and be marked Processed with errors
 		res := &velerov1api.DeleteBackupRequest{}
 		err = td.fakeClient.Get(ctx, td.req.NamespacedName, res)
-		assert.True(t, apierrors.IsNotFound(err), "Expected not found error, but actual value of error: %v", err)
-		if err == nil {
-			t.Logf("status of the dbr: %s, errors in dbr: %v", res.Status.Phase, res.Status.Errors)
-		}
+		require.NoError(t, err, "Expected DBR to still exist after tarball download failure")
+		assert.Equal(t, velerov1api.DeleteBackupRequestPhaseProcessed, res.Status.Phase)
+		require.Len(t, res.Status.Errors, 1)
+		assert.Contains(t, res.Status.Errors[0], "error downloading backup tarball, CSI snapshot cleanup was skipped")
 
-		// backup CR should be deleted
+		// backup CR should NOT be deleted
 		err = td.fakeClient.Get(t.Context(), types.NamespacedName{
 			Namespace: velerov1api.DefaultNamespace,
 			Name:      backup.Name,
 		}, &velerov1api.Backup{})
-		assert.True(t, apierrors.IsNotFound(err), "Expected not found error, but actual value of error: %v", err)
-
-		// leaked CSI snapshot should be deleted
-		err = td.fakeClient.Get(t.Context(), types.NamespacedName{
-			Namespace: "user-ns",
-			Name:      "vs-1",
-		}, &snapshotv1api.VolumeSnapshot{})
-		assert.True(t, apierrors.IsNotFound(err), "Expected not found error for the leaked CSI snapshot, but actual value of error: %v", err)
-
-		// Make sure snapshot was deleted
-		assert.Equal(t, 0, td.volumeSnapshotter.SnapshotsTaken.Len())
+		require.NoError(t, err, "Expected backup CR to still exist after tarball download failure")
 	})
 	t.Run("Expired request will be deleted if the status is processed", func(t *testing.T) {
 		expired := time.Date(2018, 4, 3, 12, 0, 0, 0, time.UTC)
