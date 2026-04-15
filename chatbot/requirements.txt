@@ -1,0 +1,27 @@
+# Azure OpenAI SDK
+openai>=1.0.0
+azure-identity>=1.15.0
+
+# Vector Database Support (choose one or multiple)
+pinecone-client>=3.0.0
+weaviate-client>=3.25.0
+
+# Document Processing and Embeddings
+langchain>=0.1.0
+langchain-openai>=0.0.2
+langchain-community>=0.0.10
+
+# Document Loaders and Text Processing
+pypdf>=3.17.0
+python-dotenv>=1.0.0
+tiktoken>=0.5.0
+
+# CLI and Utilities
+click>=8.1.0
+rich>=13.7.0
+pydantic>=2.5.0
+pyyaml>=6.0.1
+
+# Additional utilities
+tqdm>=4.66.0
+requests>=2.31.0
