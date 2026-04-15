@@ -5419,9 +5419,11 @@ func TestBackupNamespaces(t *testing.T) {
 					builder.ForDeployment("ns-1", "deploy-1").ObjectMeta(builder.WithLabels("a", "b")).Result(),
 				),
 			},
+			// ns-1 is excluded by ExcludedNamespaces even though its labels match the LabelSelector.
+			// ExcludedNamespaces takes precedence over LabelSelector for Namespace objects.
+			// ns-2 is excluded by ExcludedNamespaces (no matching labels either).
+			// ns-3 is included because it is not in ExcludedNamespaces.
 			want: []string{
-				"resources/namespaces/cluster/ns-1.json",
-				"resources/namespaces/v1-preferredversion/cluster/ns-1.json",
 				"resources/namespaces/cluster/ns-3.json",
 				"resources/namespaces/v1-preferredversion/cluster/ns-3.json",
 			},
@@ -5440,6 +5442,33 @@ func TestBackupNamespaces(t *testing.T) {
 				),
 			},
 			want: []string{},
+		},
+		{
+			name: "ExcludedNamespaces with wildcard patterns should exclude Namespace objects too",
+			// This tests the fix for https://github.com/vmware-tanzu/velero/issues/9563
+			// When excludedNamespaces contains wildcard patterns, the matching Namespace objects
+			// should not appear in the backup, not just the namespace-scoped resources within them.
+			backup: defaultBackup().IncludedNamespaces("*").ExcludedNamespaces("ns-1*", "ns-2").Result(),
+			apiResources: []*test.APIResource{
+				test.Namespaces(
+					builder.ForNamespace("ns-1").Phase(corev1api.NamespaceActive).Result(),
+					builder.ForNamespace("ns-1-extra").Phase(corev1api.NamespaceActive).Result(),
+					builder.ForNamespace("ns-2").Phase(corev1api.NamespaceActive).Result(),
+					builder.ForNamespace("ns-3").Phase(corev1api.NamespaceActive).Result(),
+				),
+				test.Deployments(
+					builder.ForDeployment("ns-1", "deploy-1").Result(),
+					builder.ForDeployment("ns-3", "deploy-3").Result(),
+				),
+			},
+			// ns-1 and ns-1-extra match the wildcard pattern "ns-1*" so they and their resources should be excluded.
+			// ns-2 is explicitly excluded. ns-3 is not excluded and should be backed up.
+			want: []string{
+				"resources/namespaces/cluster/ns-3.json",
+				"resources/namespaces/v1-preferredversion/cluster/ns-3.json",
+				"resources/deployments.apps/namespaces/ns-3/deploy-3.json",
+				"resources/deployments.apps/v1-preferredversion/namespaces/ns-3/deploy-3.json",
+			},
 		},
 		{
 			name:   "Default namespace filter test",
