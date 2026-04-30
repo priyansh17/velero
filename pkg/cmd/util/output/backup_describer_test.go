@@ -351,6 +351,42 @@ ItemOperationTimeout:  0s
 Hooks:  <none>
 `
 
+	// input6 tests the wildcard excluded namespaces describe output
+	// (fix for https://github.com/vmware-tanzu/velero/issues/9563)
+	input6 := builder.ForBackup("test-ns", "test-backup-6").
+		IncludedNamespaces("*").
+		ExcludedNamespaces("openshift*", "kube-*", "default").
+		StorageLocation("backup-location").
+		Result().Spec
+
+	expect6 := `Namespaces:
+  Included:  *
+  Excluded:  openshift*, kube-*, default
+
+Resources:
+  Included cluster-scoped:    <none>
+  Excluded cluster-scoped:    <none>
+  Included namespace-scoped:  *
+  Excluded namespace-scoped:  <none>
+
+Label selector:  <none>
+
+Or label selector:  <none>
+
+Storage Location:  backup-location
+
+Velero-Native Snapshot PVs:  auto
+Snapshot Move Data:          auto
+Data Mover:                  velero
+
+TTL:  0s
+
+CSISnapshotTimeout:    0s
+ItemOperationTimeout:  0s
+
+Hooks:  <none>
+`
+
 	testcases := []struct {
 		name   string
 		input  velerov1api.BackupSpec
@@ -380,6 +416,11 @@ Hooks:  <none>
 			name:   "DefaultVolumesToFsBackup is false",
 			input:  input5,
 			expect: expect5,
+		},
+		{
+			name:   "wildcard excluded namespaces",
+			input:  input6,
+			expect: expect6,
 		},
 	}
 
